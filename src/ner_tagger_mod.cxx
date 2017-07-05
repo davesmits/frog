@@ -41,6 +41,9 @@ using namespace Tagger;
 
 #define LOG *Log(nerLog)
 
+// should come from the config!
+const string cgn_tagset  = "http://ilk.uvt.nl/folia/sets/frog-mbpos-cgn";
+
 NERTagger::NERTagger(TiCC::LogStream * logstream):
   tagger(0),
   debug(0),
@@ -452,38 +455,39 @@ void NERTagger::addDeclaration( folia::Document& doc ) const {
 void NERTagger::Classify( const vector<folia::Word *>& swords ){
   if ( !swords.empty() ) {
     vector<string> words;
-    string sentence; // the tagger needs the whole sentence
-    for ( const auto& sw : swords ){
+    string blob;
+    string prev = "_";
+    for ( size_t i=0; i < swords.size(); ++i ){
+      folia::Word *sw = swords[i];
       UnicodeString word;
 #pragma omp critical(foliaupdate)
       {
 	word = sw->text( textclass );
       }
-      if ( filter )
+      if ( filter ){
 	word = filter->filter( word );
-      sentence += folia::UnicodeToUTF8(word);
+      }
       words.push_back( folia::UnicodeToUTF8(word) );
-      if ( &sw != &swords.back() ){
-	sentence += " ";
+      blob += folia::UnicodeToUTF8(word) + "\t" + prev + "\t";
+      folia::PosAnnotation *postag
+	= sw->annotation<folia::PosAnnotation>( cgn_tagset );
+      string pos = postag->cls();
+      blob += pos + "\t";
+      prev = pos;
+      if ( i < swords.size() - 1 ){
+	folia::PosAnnotation *postag
+	  = swords[i+1]->annotation<folia::PosAnnotation>( cgn_tagset );
+	blob += postag->cls();
       }
-    }
-    if (debug){
-      LOG << "NER in: " << sentence << endl;
-    }
-    vector<TagResult> tagv = tagger->TagLine(sentence);
-    if ( tagv.size() != swords.size() ){
-      string out;
-      for ( const auto& val : tagv ){
-	out += val.word() + "//" + val.assignedTag() + " ";
+      else {
+	blob += "_";
       }
-      if ( debug ){
-	LOG << "NER tagger is confused" << endl;
-	LOG << "sentences was: '" << sentence << "'" << endl;
-	LOG << "but tagged:" << endl;
-	LOG << out << endl;
-      }
-      throw runtime_error( "NER failed: '" + sentence + "' ==> '" + out + "'" );
+      blob += "\t??\n";
     }
+    if ( debug ){
+      LOG << "TAGGING BLOB\n" << blob << endl;
+    }
+    vector<TagResult> tagv = tagger->TagLine( blob );
     if ( debug ){
       LOG << "NER tagger out: " << endl;
       for ( size_t i=0; i < tagv.size(); ++i ){
@@ -492,8 +496,8 @@ void NERTagger::Classify( const vector<folia::Word *>& swords ){
 	    << " confidence=" << tagv[i].confidence() << endl;
       }
     }
-    vector<double> conf;
     vector<string> tags;
+    vector<double> conf;
     for ( const auto& tag : tagv ){
       tags.push_back( tag.assignedTag() );
       conf.push_back( tag.confidence() );

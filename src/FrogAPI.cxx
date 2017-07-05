@@ -395,6 +395,8 @@ bool FrogAPI::TestSentence( Sentence* sent, TimerBlock& timers){
   if ( !swords.empty() ) {
 #pragma omp parallel sections shared(all_well,exs,swords)
     {
+      // POS and IOB tagger can run in parallel
+      // the results ar used bij the next series of parallel modules
 #pragma omp section
       {
 	timers.tagTimer.start();
@@ -421,21 +423,8 @@ bool FrogAPI::TestSentence( Sentence* sent, TimerBlock& timers){
 	  timers.iobTimer.stop();
 	}
       }
-#pragma omp section
-      {
-	if ( options.doNER ){
-	  timers.nerTimer.start();
-	  try {
-	    myNERTagger->Classify( swords );
-	  }
-	  catch ( exception&e ){
-	    all_well = false;
-	    exs += string(e.what()) + " ";
-	  }
-	  timers.nerTimer.stop();
-	}
-      }
     } // parallel sections
+
     if ( !all_well ){
       throw runtime_error( exs );
     }
@@ -480,6 +469,20 @@ bool FrogAPI::TestSentence( Sentence* sent, TimerBlock& timers){
     } //for all words
     if ( !all_well ){
       throw runtime_error( exs );
+    }
+    if ( options.doNER ){
+      timers.nerTimer.start();
+      if (options.debugFlag) {
+	LOG << "Calling NER..." << endl;
+      }
+      try {
+	myNERTagger->Classify( swords );
+      }
+      catch ( exception&e ){
+	all_well = false;
+	exs += string(e.what()) + " ";
+      }
+      timers.nerTimer.stop();
     }
 
     if ( options.doMwu ){
