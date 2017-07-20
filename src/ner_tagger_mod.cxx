@@ -151,17 +151,22 @@ bool NERTagger::init( const Configuration& config ){
   return tagger->isInit();
 }
 
-bool NERTagger::fill_known_ners( const string& name, const string& config_dir ){
+bool NERTagger::fill_ners( const string& cat,
+			   const string& name,
+			   const string& config_dir ){
   string file_name = name;
-  if ( name[0] != '/' ) {
-    file_name = config_dir + file_name;
+  if ( !TiCC::isFile( file_name ) ){
+    file_name = config_dir + name;
+    if ( !TiCC::isFile( file_name ) ){
+      LOG << "unable to load additional NE from file: " << file_name << endl;
+      return false;
+    }
   }
-  ifstream is( file_name );
-  if ( !is ){
-    LOG << "unable to load additional NE from " << file_name << endl;
+  else {
+    LOG << "unable to load additional NE from file: " << file_name << endl;
     return false;
   }
-  int err_cnt = 0;
+  ifstream is( file_name );
   int long_err_cnt = 0;
   size_t ner_cnt = 0;
   string line;
@@ -169,41 +174,10 @@ bool NERTagger::fill_known_ners( const string& name, const string& config_dir ){
     if ( line.empty() || line[0] == '#' ){
       continue;
     }
-    if ( TiCC::isFile( line ) ){
-      if ( !fill_known_ners( line, "" ) ){
-	LOG << "unable to load additional NE from included file: "
-	    << line << endl;
-	return false;
-      }
-    }
-    else if ( TiCC::isFile( config_dir + line ) ){
-      if ( !fill_known_ners( line, config_dir ) ){
-	LOG << "unable to load additional NE from include file: "
-	    << config_dir + line << endl;
-	return false;
-      }
-    }
     else {
       vector<string> parts;
-      if ( TiCC::split_at( line, parts, "\t" ) != 2 ){
-	LOG << "expected 2 TAB-separated parts in line: '" << line << "'" << endl;
-	if ( ++err_cnt > 50 ){
-	  LOG << "too many errors in additional wordlist file: " << file_name << endl;
-	  return false;
-	}
-	else {
-	  LOG << "ignoring entry" << endl;
-	  continue;
-	}
-      }
-      line = parts[0];
-      string ner_value = parts[1];
       size_t num = TiCC::split( line, parts );
-      if ( num == 1 ){
-	// ignore single word NE's
-	continue;
-      }
-      if ( num < 1 || num > (unsigned)max_ner_size ){
+      if ( num > (unsigned)max_ner_size ){
 	// LOG << "expected 1 to " << max_ner_size
 	// 		   << " SPACE-separated parts in line: '" << line
 	// 		   << "'" << endl;
@@ -218,6 +192,7 @@ bool NERTagger::fill_known_ners( const string& name, const string& config_dir ){
 	  continue;
 	}
       }
+      // reconstruct the NER with single spaces
       line = "";
       for ( const auto& part : parts ){
 	line += part;
@@ -225,12 +200,51 @@ bool NERTagger::fill_known_ners( const string& name, const string& config_dir ){
 	  line += " ";
 	}
       }
-      known_ners[num][line] = ner_value;
+      known_ners[num][line] += cat + "+";
       ++ner_cnt;
     }
   }
   LOG << "loaded " << ner_cnt << " additional Named Entities from"
       << file_name << endl;
+  return true;
+}
+
+bool NERTagger::fill_known_ners( const string& name, const string& config_dir ){
+  string file_name = name;
+  if ( name[0] != '/' ) {
+    file_name = config_dir + file_name;
+  }
+  ifstream is( file_name );
+  if ( !is ){
+    LOG << "unable to load additional Named Enties file " << file_name << endl;
+    return false;
+  }
+  int err_cnt = 0;
+  size_t file_cnt = 0;
+  string line;
+  while ( getline( is, line ) ){
+    if ( line.empty() || line[0] == '#' ){
+      continue;
+    }
+    // we search for entries of the form 'category\tfilename'
+    vector<string> parts;
+    if ( TiCC::split_at( line, parts, "\t" ) != 2 ){
+      LOG << "expected 2 TAB-separated parts in line: '" << line << "'" << endl;
+      if ( ++err_cnt > 50 ){
+	LOG << "too many errors in additional wordlist file: " << file_name << endl;
+	return false;
+      }
+      else {
+	LOG << "ignoring entry" << endl;
+	continue;
+      }
+    }
+    string cat  = parts[0];
+    string file = parts[1];
+    fill_ners( cat, file, config_dir );
+    ++file_cnt;
+  }
+  LOG << "loaded " << file_cnt << " additional Named Entities files" << endl;
   return true;
 }
 
@@ -244,8 +258,26 @@ size_t count_sp( const string& sentence, string::size_type pos ){
   return sp;
 }
 
-void NERTagger::handle_known_ners( const vector<string>& words,
-				   vector<string>& tags ){
+void cleanup_and_normalize( vector<string>& tags ){
+  for ( auto& t : tags ){
+    if ( t.size() > 1 ){
+      t.erase(0,1);
+      set<string> norm;
+      vector<string> parts;
+      TiCC::split_at( t, parts, "+" );
+      for ( const auto& p : parts ){
+	norm.insert(p);
+      }
+      t.clear();
+      for ( const auto& n : norm ){
+	t += n + "+";
+      }
+    }
+  }
+}
+
+void NERTagger::create_ner_list( const vector<string>& words,
+				 vector<string>& tags ){
   if ( debug ){
     LOG << "search for known NER's" << endl;
   }
@@ -272,21 +304,14 @@ void NERTagger::handle_known_ners( const vector<string>& words,
 	      << sentence << "' at position " << sp
 	      << " : " << it.second << endl;
 	}
-	bool safe = true;
-	for ( size_t j=0; j < i && safe; ++j ){
-	  safe = ( tags[sp+j] == "O" );
-	}
-	if ( safe ){
-	  // we can safely change the tag (don't trample upon hits of longer known ners!)
-	  tags[sp] = "B-" + it.second;
-	  for ( size_t j=1; j < i; ++j ){
-	    tags[sp+j] = "I-" + it.second;
-	  }
+	for ( size_t j=0; j < i; ++j ){
+	  tags[sp+j] += it.second;
 	}
 	pos = sentence.find( blub, pos + blub.length() );
       }
     }
   }
+  cleanup_and_normalize( tags );
 }
 
 void NERTagger::merge( const vector<string>& ktags, vector<string>& tags,
@@ -455,38 +480,54 @@ void NERTagger::addDeclaration( folia::Document& doc ) const {
 void NERTagger::Classify( const vector<folia::Word *>& swords ){
   if ( !swords.empty() ) {
     vector<string> words;
-    string blob;
-    string prev = "_";
+    vector<string> ptags;
     for ( size_t i=0; i < swords.size(); ++i ){
       folia::Word *sw = swords[i];
+      folia::PosAnnotation *postag = 0;
       UnicodeString word;
 #pragma omp critical(foliaupdate)
       {
 	word = sw->text( textclass );
+	postag = sw->annotation<folia::PosAnnotation>( cgn_tagset );
       }
       if ( filter ){
 	word = filter->filter( word );
       }
       words.push_back( folia::UnicodeToUTF8(word) );
-      blob += folia::UnicodeToUTF8(word) + "\t" + prev + "\t";
-      folia::PosAnnotation *postag
-	= sw->annotation<folia::PosAnnotation>( cgn_tagset );
-      string pos = postag->cls();
-      blob += pos + "\t";
+      ptags.push_back( postag->cls() );
+    }
+    vector<string> ktags( words.size(), "_" );
+    create_ner_list( words, ktags );
+    string blob;
+    string prev = "_";
+    string prevN = "_";
+    for ( size_t i=0; i < swords.size(); ++i ){
+      string word = words[i];
+      string pos = ptags[i];
+      blob += word + "\t" + prev + "\t" + pos + "\t";
       prev = pos;
       if ( i < swords.size() - 1 ){
-	folia::PosAnnotation *postag
-	  = swords[i+1]->annotation<folia::PosAnnotation>( cgn_tagset );
-	blob += postag->cls();
+	blob += ptags[i+1];
       }
       else {
 	blob += "_";
       }
+      string ktag = ktags[i];
+      blob += "\t" + prevN + "\t" + ktag + "\t";
+      prevN = ktag;
+      if ( i < swords.size() - 1 ){
+	blob += ktags[i+1];
+      }
+      else {
+	blob += "_";
+      }
+
       blob += "\t??\n";
     }
-    if ( debug ){
+    if ( 1 || debug ){
       LOG << "TAGGING BLOB\n" << blob << endl;
     }
+    return;
     vector<TagResult> tagv = tagger->TagLine( blob );
     if ( debug ){
       LOG << "NER tagger out: " << endl;
@@ -502,10 +543,6 @@ void NERTagger::Classify( const vector<folia::Word *>& swords ){
       tags.push_back( tag.assignedTag() );
       conf.push_back( tag.confidence() );
     }
-    vector<string> ktags( tagv.size(), "O" );
-    handle_known_ners( words, ktags );
-    merge( ktags, tags, conf );
-    addNERTags( swords, tags, conf );
   }
 }
 

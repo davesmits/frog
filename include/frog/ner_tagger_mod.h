@@ -45,8 +45,9 @@ class NERTagger {
   std::string getTagset() const { return tagset; };
   std::vector<Tagger::TagResult> tagLine( const std::string& );
   bool fill_known_ners( const std::string&, const std::string& );
-  void handle_known_ners( const std::vector<std::string>&,
-			  std::vector<std::string>& );
+  bool fill_ners( const std::string&, const std::string&, const std::string& );
+  void create_ner_list( const std::vector<std::string>&,
+			std::vector<std::string>& );
   void merge( const std::vector<std::string>&,
 	      std::vector<std::string>& tags,
 	      std::vector<double>& );
