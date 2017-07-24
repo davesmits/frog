@@ -51,6 +51,7 @@ NERTagger::NERTagger(TiCC::LogStream * logstream):
   max_ner_size(10)
 {
   nerLog = new LogStream( logstream, "ner-" );
+  known_ners.resize( max_ner_size + 1 );
 }
 
 NERTagger::~NERTagger(){
@@ -135,7 +136,7 @@ bool NERTagger::init( const Configuration& config ){
   known_ners.resize( max_ner_size + 1 );
   val = config.lookUp( "known_ners", "NER" );
   if ( !val.empty() ){
-    if ( !fill_known_ners( val, config.configDir() ) ){
+    if ( !read_gazets( val, config.configDir() ) ){
       return false;
     }
   }
@@ -161,10 +162,6 @@ bool NERTagger::fill_ners( const string& cat,
       LOG << "unable to load additional NE from file: " << file_name << endl;
       return false;
     }
-  }
-  else {
-    LOG << "unable to load additional NE from file: " << file_name << endl;
-    return false;
   }
   ifstream is( file_name );
   int long_err_cnt = 0;
@@ -204,21 +201,22 @@ bool NERTagger::fill_ners( const string& cat,
       ++ner_cnt;
     }
   }
-  LOG << "loaded " << ner_cnt << " additional Named Entities from"
+  LOG << "loaded " << ner_cnt << " additional Named Entities from: "
       << file_name << endl;
   return true;
 }
 
-bool NERTagger::fill_known_ners( const string& name, const string& config_dir ){
+bool NERTagger::read_gazets( const string& name, const string& config_dir ){
   string file_name = name;
   if ( name[0] != '/' ) {
     file_name = config_dir + file_name;
   }
   ifstream is( file_name );
   if ( !is ){
-    LOG << "unable to load additional Named Enties file " << file_name << endl;
+    LOG << "Unable to find Named Enties file " << file_name << endl;
     return false;
   }
+  LOG << "READ  " << file_name << endl;
   int err_cnt = 0;
   size_t file_cnt = 0;
   string line;
@@ -259,9 +257,11 @@ size_t count_sp( const string& sentence, string::size_type pos ){
 }
 
 void cleanup_and_normalize( vector<string>& tags ){
+  // we might have duplicate entries line +per+per
+  // and sorting isn't assured. (+per+loc vs. +loc+per)
   for ( auto& t : tags ){
     if ( t.size() > 1 ){
-      t.erase(0,1);
+      t.erase(0,1); // the leading "O"
       set<string> norm;
       vector<string> parts;
       TiCC::split_at( t, parts, "+" );
@@ -278,6 +278,8 @@ void cleanup_and_normalize( vector<string>& tags ){
 
 void NERTagger::create_ner_list( const vector<string>& words,
 				 vector<string>& tags ){
+  tags.clear();
+  tags.resize( words.size(), "O" );
   if ( debug ){
     LOG << "search for known NER's" << endl;
   }
@@ -312,50 +314,6 @@ void NERTagger::create_ner_list( const vector<string>& words,
     }
   }
   cleanup_and_normalize( tags );
-}
-
-void NERTagger::merge( const vector<string>& ktags, vector<string>& tags,
-		       vector<double>& conf ){
-  if ( debug ){
-    using TiCC::operator<<;
-    LOG << "merge " << ktags << endl << "with  " << tags << endl;
-  }
-  for ( size_t i=0; i < ktags.size(); ++i ){
-    if ( ktags[i] == "O" ){
-      if ( i > 0 && ktags[i-1] != "O" ){
-	// so we did some merging.  check that we aren't in the middle of some tag now
-	size_t j = i;
-	while ( j < tags.size() && tags[j][0] == 'I' ) {
-	  tags[j] = "O";
-	  ++j;
-	}
-      }
-      continue;
-    }
-    else if ( ktags[i][0] == 'B' ){
-      // maybe we landed in the middle of some tag.
-      if ( i > 0 && tags[i][0] == 'I' ){
-	// indeed, so erase it backwards
-	// except when at the start. then an 'I' should be a 'B' anyway
-	size_t j = i;
-	while ( tags[j][0] == 'I' ){
-	  tags[j] = "O";
-	  --j;
-	}
-	tags[j] = "O";
-      }
-      // now copy
-      tags[i] = ktags[i];
-      conf[i] = 1.0;
-    }
-    else {
-      tags[i] = ktags[i];
-      conf[i] = 1.0;
-    }
-  }
-  if ( debug ){
-    LOG << "Merge gave " << tags << endl;
-  }
 }
 
 static void addEntity( folia::Sentence *sent,
@@ -496,39 +454,38 @@ void NERTagger::Classify( const vector<folia::Word *>& swords ){
       words.push_back( folia::UnicodeToUTF8(word) );
       ptags.push_back( postag->cls() );
     }
-    vector<string> ktags( words.size(), "_" );
+    vector<string> ktags;
     create_ner_list( words, ktags );
-    string blob;
+    string text_block;
     string prev = "_";
     string prevN = "_";
     for ( size_t i=0; i < swords.size(); ++i ){
       string word = words[i];
       string pos = ptags[i];
-      blob += word + "\t" + prev + "\t" + pos + "\t";
+      text_block += word + "\t" + prev + "\t" + pos + "\t";
       prev = pos;
       if ( i < swords.size() - 1 ){
-	blob += ptags[i+1];
+	text_block += ptags[i+1];
       }
       else {
-	blob += "_";
+	text_block += "_";
       }
       string ktag = ktags[i];
-      blob += "\t" + prevN + "\t" + ktag + "\t";
+      text_block += "\t" + prevN + "\t" + ktag + "\t";
       prevN = ktag;
       if ( i < swords.size() - 1 ){
-	blob += ktags[i+1];
+	text_block += ktags[i+1];
       }
       else {
-	blob += "_";
+	text_block += "_";
       }
 
-      blob += "\t??\n";
+      text_block += "\t??\n";
     }
     if ( 1 || debug ){
-      LOG << "TAGGING BLOB\n" << blob << endl;
+      LOG << "TAGGING TEXT_BLOCK\n" << text_block << endl;
     }
-    return;
-    vector<TagResult> tagv = tagger->TagLine( blob );
+    vector<TagResult> tagv = tagger->TagLine( text_block );
     if ( debug ){
       LOG << "NER tagger out: " << endl;
       for ( size_t i=0; i < tagv.size(); ++i ){
@@ -558,4 +515,8 @@ string NERTagger::set_eos_mark( const string& eos ){
     return tagger->set_eos_mark(eos);
   }
   throw runtime_error( "NERTagger is not initialized" );
+}
+
+bool NERTagger::Generate( const std::string& opt_line ){
+  return tagger->GenerateTagger( opt_line );
 }
