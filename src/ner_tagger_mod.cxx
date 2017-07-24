@@ -482,11 +482,11 @@ void NERTagger::Classify( const vector<folia::Word *>& swords ){
 
       text_block += "\t??\n";
     }
-    if ( 1 || debug ){
+    if ( debug ){
       LOG << "TAGGING TEXT_BLOCK\n" << text_block << endl;
     }
     vector<TagResult> tagv = tagger->TagLine( text_block );
-    if ( 1||debug ){
+    if ( debug ){
       LOG << "NER tagger out: " << endl;
       for ( size_t i=0; i < tagv.size(); ++i ){
 	LOG << "[" << i << "] : word=" << tagv[i].word()
