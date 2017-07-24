@@ -486,7 +486,7 @@ void NERTagger::Classify( const vector<folia::Word *>& swords ){
       LOG << "TAGGING TEXT_BLOCK\n" << text_block << endl;
     }
     vector<TagResult> tagv = tagger->TagLine( text_block );
-    if ( debug ){
+    if ( 1||debug ){
       LOG << "NER tagger out: " << endl;
       for ( size_t i=0; i < tagv.size(); ++i ){
 	LOG << "[" << i << "] : word=" << tagv[i].word()
@@ -500,6 +500,7 @@ void NERTagger::Classify( const vector<folia::Word *>& swords ){
       tags.push_back( tag.assignedTag() );
       conf.push_back( tag.confidence() );
     }
+    addNERTags( swords, tags, conf );
   }
 }
 
