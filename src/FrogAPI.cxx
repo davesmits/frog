@@ -395,8 +395,6 @@ bool FrogAPI::TestSentence( Sentence* sent, TimerBlock& timers){
   if ( !swords.empty() ) {
 #pragma omp parallel sections shared(all_well,exs,swords)
     {
-      // POS and IOB tagger can run in parallel
-      // the results ar used bij the next series of parallel modules
 #pragma omp section
       {
 	timers.tagTimer.start();
@@ -408,20 +406,6 @@ bool FrogAPI::TestSentence( Sentence* sent, TimerBlock& timers){
 	  exs += string(e.what()) + " ";
 	}
 	timers.tagTimer.stop();
-      }
-#pragma omp section
-      {
-	if ( options.doIOB ){
-	  timers.iobTimer.start();
-	  try {
-	    myIOBTagger->Classify( swords );
-	  }
-	  catch ( exception&e ){
-	    all_well = false;
-	    exs += string(e.what()) + " ";
-	  }
-	  timers.iobTimer.stop();
-	}
       }
     } // parallel sections
 
@@ -470,35 +454,57 @@ bool FrogAPI::TestSentence( Sentence* sent, TimerBlock& timers){
     if ( !all_well ){
       throw runtime_error( exs );
     }
-    if ( options.doNER ){
-      timers.nerTimer.start();
-      if (options.debugFlag) {
-	LOG << "Calling NER..." << endl;
+#pragma omp parallel sections
+    {
+#pragma omp section
+      {
+	if ( options.doNER ){
+	  timers.nerTimer.start();
+	  if (options.debugFlag) {
+	    LOG << "Calling NER..." << endl;
+	  }
+	  try {
+	    myNERTagger->Classify( swords );
+	  }
+	  catch ( exception&e ){
+	    all_well = false;
+	    exs += string(e.what()) + " ";
+	  }
+	  timers.nerTimer.stop();
+	}
       }
-      try {
-	myNERTagger->Classify( swords );
+#pragma omp section
+      {
+	if ( options.doIOB ){
+	  timers.iobTimer.start();
+	  try {
+	    myIOBTagger->Classify( swords );
+	  }
+	  catch ( exception&e ){
+	    all_well = false;
+	    exs += string(e.what()) + " ";
+	  }
+	  timers.iobTimer.stop();
+	}
       }
-      catch ( exception&e ){
-	all_well = false;
-	exs += string(e.what()) + " ";
-      }
-      timers.nerTimer.stop();
-    }
-
-    if ( options.doMwu ){
-      if ( swords.size() > 0 ){
-	timers.mwuTimer.start();
-	myMwu->Classify( swords );
-	timers.mwuTimer.stop();
-      }
-    }
-    if ( options.doParse ){
-      if ( options.maxParserTokens != 0
-	   && swords.size() > options.maxParserTokens ){
-	showParse = false;
-      }
-      else {
-        myParser->Parse( swords, timers );
+#pragma omp section
+      {
+	if ( options.doMwu ){
+	  if ( swords.size() > 0 ){
+	    timers.mwuTimer.start();
+	    myMwu->Classify( swords );
+	    timers.mwuTimer.stop();
+	  }
+	}
+	if ( options.doParse ){
+	  if ( options.maxParserTokens != 0
+	       && swords.size() > options.maxParserTokens ){
+	    showParse = false;
+	  }
+	  else {
+	    myParser->Parse( swords, timers );
+	  }
+	}
       }
     }
   }

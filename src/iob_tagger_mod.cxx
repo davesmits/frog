@@ -41,6 +41,9 @@ using namespace Tagger;
 
 #define LOG *Log(iobLog)
 
+// should come from the config!
+const string cgn_tagset  = "http://ilk.uvt.nl/folia/sets/frog-mbpos-cgn";
+
 IOBTagger::IOBTagger(TiCC::LogStream * logstream):
   tagger( 0 ),
   debug( 0 ),
@@ -198,23 +201,15 @@ void IOBTagger::addIOBTags( const vector<Word*>& words,
   vector<Word*> stack;
   vector<double> dstack;
   string curIOB;
-  for ( size_t i=0; i < tags.size(); ++i ){
-    if (debug){
-      LOG << "tag = " << tags[i] << endl;
-    }
-    vector<string> tagwords;
-    size_t num_words = TiCC::split_at( tags[i], tagwords, "_" );
-    if ( num_words != 2 ){
-      LOG << "expected <POS>_<IOB>, got: " << tags[i] << endl;
-      throw;
-    }
+  int i = 0;
+  for ( const auto& tag : tags ){
     vector<string> iob;
-    if (debug){
-      LOG << "IOB = " << tagwords[1] << endl;
+    if ( debug){
+      LOG << "word=" << words[i]->text() << " IOB TAG = " << tag << endl;
     }
-    if ( tagwords[1] == "O" ){
+    if ( tag == "O" ){
       if ( !stack.empty() ){
-	if (debug) {
+	if ( debug) {
 	  LOG << "O spit out " << curIOB << endl;
 	  using TiCC::operator<<;
 	  LOG << "spit out " << stack << endl;
@@ -226,9 +221,9 @@ void IOBTagger::addIOBTags( const vector<Word*>& words,
       continue;
     }
     else {
-      num_words = TiCC::split_at( tagwords[1], iob, "-" );
+      int num_words = TiCC::split_at( tag, iob, "-" );
       if ( num_words != 2 ){
-	LOG << "expected <IOB>-tag, got: " << tagwords[1] << endl;
+	LOG << "expected <IOB>-tag, got: " << tag << endl;
 	throw;
       }
     }
@@ -251,6 +246,7 @@ void IOBTagger::addIOBTags( const vector<Word*>& words,
     }
     dstack.push_back( confs[i] );
     stack.push_back( words[i] );
+    ++i;
   }
   if ( !stack.empty() ){
     if ( debug ){
@@ -274,27 +270,42 @@ void IOBTagger::addDeclaration( Document& doc ) const {
 
 void IOBTagger::Classify( const vector<Word *>& swords ){
   if ( !swords.empty() ) {
-    string sentence; // the tagger needs the whole sentence
-    for ( const auto& sword : swords ){
+    vector<string> words;
+    vector<string> ptags;
+    for ( size_t i=0; i < swords.size(); ++i ){
+      folia::Word *sw = swords[i];
+      folia::PosAnnotation *postag = 0;
       UnicodeString word;
 #pragma omp critical(foliaupdate)
       {
-	word = sword->text( textclass );
+	word = sw->text( textclass );
+	postag = sw->annotation<folia::PosAnnotation>( cgn_tagset );
       }
-      if ( filter )
+      if ( filter ){
 	word = filter->filter( word );
-      sentence += UnicodeToUTF8(word);
-      if ( &sword != &swords.back() ){
-	sentence += " ";
       }
+      words.push_back( folia::UnicodeToUTF8(word) );
+      ptags.push_back( postag->cls() );
     }
-    if (debug){
-      LOG << "IOB in: " << sentence << endl;
+    string text_block;
+    string prev = "_";
+    for ( size_t i=0; i < swords.size(); ++i ){
+      string word = words[i];
+      string pos = ptags[i];
+      text_block += word + "\t" + prev + "\t" + pos + "\t";
+      prev = pos;
+      if ( i < swords.size() - 1 ){
+	text_block += ptags[i+1];
+      }
+      else {
+	text_block += "_";
+      }
+      text_block += "\t??\n";
     }
-    vector<TagResult> tagv = tagger->TagLine(sentence);
-    if ( tagv.size() != swords.size() ){
-      throw runtime_error( "IOB tagger is confused" );
+    if ( debug ){
+      LOG << "TAGGING TEXT_BLOCK\n" << text_block << endl;
     }
+    vector<TagResult> tagv = tagger->TagLine( text_block );
     if ( debug ){
       LOG << "IOB tagger out: " << endl;
       for ( size_t i=0; i < tagv.size(); ++i ){
