@@ -218,6 +218,7 @@ void IOBTagger::addIOBTags( const vector<Word*>& words,
 	dstack.clear();
 	stack.clear();
       }
+      ++i;
       continue;
     }
     else {
