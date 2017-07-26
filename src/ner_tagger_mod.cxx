@@ -157,7 +157,7 @@ bool NERTagger::fill_ners( const string& cat,
 			   const string& config_dir ){
   string file_name = name;
   if ( !TiCC::isFile( file_name ) ){
-    file_name = config_dir + name;
+    file_name = config_dir + "/" + name;
     if ( !TiCC::isFile( file_name ) ){
       LOG << "unable to load additional NE from file: " << file_name << endl;
       return false;
@@ -201,15 +201,15 @@ bool NERTagger::fill_ners( const string& cat,
       ++ner_cnt;
     }
   }
-  LOG << "loaded " << ner_cnt << " additional Named Entities from: "
-      << file_name << endl;
+  LOG << "loaded " << ner_cnt << " additional " << cat
+      << " Named Entities from: " << file_name << endl;
   return true;
 }
 
 bool NERTagger::read_gazets( const string& name, const string& config_dir ){
   string file_name = name;
   if ( name[0] != '/' ) {
-    file_name = config_dir + file_name;
+    file_name = config_dir + "/" + file_name;
   }
   ifstream is( file_name );
   if ( !is ){
@@ -239,11 +239,18 @@ bool NERTagger::read_gazets( const string& name, const string& config_dir ){
     }
     string cat  = parts[0];
     string file = parts[1];
-    fill_ners( cat, file, config_dir );
-    ++file_cnt;
+    if ( fill_ners( cat, file, config_dir ) ){
+      ++file_cnt;
+    }
   }
-  LOG << "loaded " << file_cnt << " additional Named Entities files" << endl;
-  return true;
+  if ( file_cnt < 1 ){
+    LOG << "unable to load any additional Named Enties." << endl;
+    return false;
+  }
+  else {
+    LOG << "loaded " << file_cnt << " additional Named Entities files" << endl;
+    return true;
+  }
 }
 
 size_t count_sp( const string& sentence, string::size_type pos ){
