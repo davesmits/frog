@@ -206,6 +206,23 @@ bool NERTagger::fill_ners( const string& cat,
   return true;
 }
 
+void cleanup_and_normalize( string& tag ){
+  // we might have duplicate entries like +per+per
+  // and sorting isn't assured. (+per+loc vs. +loc+per)
+  if ( !tag.empty() ){
+    set<string> norm;
+    vector<string> parts;
+    TiCC::split_at( tag, parts, "+" );
+    for ( const auto& p : parts ){
+      norm.insert(p);
+    }
+    tag.clear();
+    for ( const auto& n : norm ){
+      tag += n + "+";
+    }
+  }
+}
+
 bool NERTagger::read_gazets( const string& name, const string& config_dir ){
   string file_name = name;
   if ( name[0] != '/' ) {
@@ -248,6 +265,11 @@ bool NERTagger::read_gazets( const string& name, const string& config_dir ){
     return false;
   }
   else {
+    for ( int i =0; i < max_ner_size; ++i ){
+      for ( auto& it : known_ners[i] ){
+	cleanup_and_normalize( it.second );
+      }
+    }
     LOG << "loaded " << file_cnt << " additional Named Entities files" << endl;
     return true;
   }
