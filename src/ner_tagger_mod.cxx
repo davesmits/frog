@@ -197,30 +197,13 @@ bool NERTagger::fill_ners( const string& cat,
 	  line += " ";
 	}
       }
-      known_ners[num][line] += cat + "+";
+      known_ners[num][line].insert( cat );
       ++ner_cnt;
     }
   }
   LOG << "loaded " << ner_cnt << " additional " << cat
       << " Named Entities from: " << file_name << endl;
   return true;
-}
-
-void cleanup_and_normalize( string& tag ){
-  // we might have duplicate entries like +per+per
-  // and sorting isn't assured. (+per+loc vs. +loc+per)
-  if ( !tag.empty() ){
-    set<string> norm;
-    vector<string> parts;
-    TiCC::split_at( tag, parts, "+" );
-    for ( const auto& p : parts ){
-      norm.insert(p);
-    }
-    tag.clear();
-    for ( const auto& n : norm ){
-      tag += n + "+";
-    }
-  }
 }
 
 bool NERTagger::read_gazets( const string& name, const string& config_dir ){
@@ -265,11 +248,6 @@ bool NERTagger::read_gazets( const string& name, const string& config_dir ){
     return false;
   }
   else {
-    for ( int i =0; i < max_ner_size; ++i ){
-      for ( auto& it : known_ners[i] ){
-	cleanup_and_normalize( it.second );
-      }
-    }
     LOG << "loaded " << file_cnt << " additional Named Entities files" << endl;
     return true;
   }
@@ -285,23 +263,20 @@ size_t count_sp( const string& sentence, string::size_type pos ){
   return sp;
 }
 
-void cleanup_and_normalize( vector<string>& tags ){
-  // we might have duplicate entries line +per+per
-  // and sorting isn't assured. (+per+loc vs. +loc+per)
-  for ( auto& t : tags ){
-    if ( t.size() > 1 ){
-      t.erase(0,1); // the leading "O"
-      set<string> norm;
-      vector<string> parts;
-      TiCC::split_at( t, parts, "+" );
-      for ( const auto& p : parts ){
-	norm.insert(p);
+void serialize( const vector<set<string>>& stags, vector<string>& tags ){
+  size_t pos = 0;
+  for ( const auto& it : stags ){
+    // using TiCC::operator<<;
+    // cerr << "stag[" << pos << "] =" << it << endl;
+    if ( !it.empty() ){
+      string res;
+      for ( const auto& s : it ){
+	res += s + "+";
       }
-      t.clear();
-      for ( const auto& n : norm ){
-	t += n + "+";
-      }
+      //      cerr << "res=" << res << endl;
+      tags[pos] = res;
     }
+    ++pos;
   }
 }
 
@@ -309,6 +284,7 @@ void NERTagger::create_ner_list( const vector<string>& words,
 				 vector<string>& tags ){
   tags.clear();
   tags.resize( words.size(), "O" );
+  vector<set<string>> stags( words.size() );
   if ( debug ){
     LOG << "search for known NER's" << endl;
   }
@@ -327,6 +303,9 @@ void NERTagger::create_ner_list( const vector<string>& words,
     }
     for( auto const& it : mp ){
       string blub = " " + it.first + " ";
+      if ( debug ){
+	LOG << "blub = " << blub << endl;
+      }
       string::size_type pos = sentence.find( blub );
       while ( pos != string::npos ){
 	size_t sp = count_sp( sentence, pos );
@@ -336,13 +315,13 @@ void NERTagger::create_ner_list( const vector<string>& words,
 	      << " : " << it.second << endl;
 	}
 	for ( size_t j=0; j < i; ++j ){
-	  tags[sp+j] += it.second;
+	  stags[sp+j].insert( it.second.begin(), it.second.end() );
 	}
 	pos = sentence.find( blub, pos + blub.length() );
       }
     }
   }
-  cleanup_and_normalize( tags );
+  serialize( stags, tags );
 }
 
 static void addEntity( folia::Sentence *sent,

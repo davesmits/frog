@@ -57,7 +57,7 @@ class NERTagger {
   std::string version;
   std::string tagset;
   std::string textclass;
-  std::vector<std::map<std::string,std::string>> known_ners;
+  std::vector<std::map<std::string,std::set<std::string>>> known_ners;
   Tokenizer::UnicodeFilter *filter;
   int max_ner_size;
   NERTagger( const NERTagger& ){}; //inhibit copy
